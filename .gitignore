@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+datos/estado_actual.json
+datos/corte_*.txt
