@@ -178,3 +178,221 @@ class GestorEstacionamiento:
             if self._auto_guardar:
                 self._guardar_sin_lock()
             return boleto
+
+    def registrar_salida(
+        self,
+        identificador,
+        fecha_hora,
+        monto_ticket_compra=0.0,
+        kwh_cargados=0.0,
+        boleto_perdido=False,
+    ):
+        """Calcula el cobro, libera el cajón y registra la salida."""
+        if float(monto_ticket_compra) < 0 or float(kwh_cargados) < 0:
+            raise ValueError("El monto de compra y los kWh cargados no pueden ser negativos.")
+
+        with self._lock:
+            clave = identificador.strip().upper()
+            boleto = self._boletos_activos.get(clave)
+            if boleto is None:
+                for b in self._boletos_activos.values():
+                    if b.folio.upper() == clave:
+                        boleto = b
+                        break
+
+            if boleto is None:
+                raise BoletoNoEncontradoError(
+                    f"No se encontró un vehículo activo con placa o folio '{identificador}'."
+                )
+
+            pension = self._pensiones.get(boleto.placa)
+            if pension and pension.esta_vigente(fecha_hora):
+                estrategia = CobroPensionadoVigente()
+            elif boleto_perdido:
+                estrategia = CobroBoletoPerdido()
+            else:
+                estrategia = CobroVisitanteEstandar()
+
+            desglose = estrategia.calcular(
+                boleto=boleto,
+                hora_salida=fecha_hora,
+                config=self._tarifas,
+                monto_ticket_compra=monto_ticket_compra,
+                kwh_cargados=kwh_cargados,
+            )
+
+            cajon = self._cajones_por_id[boleto.id_cajon]
+            cajon.ocupado = False
+            cajon.placa_actual = None
+            del self._boletos_activos[boleto.placa]
+
+            self._historial.append(
+                RegistroMovimiento(
+                    fecha_hora=fecha_hora,
+                    tipo_operacion="SALIDA",
+                    placa=boleto.placa,
+                    tipo_vehiculo=boleto.tipo_vehiculo,
+                    monto_estacionamiento=desglose.estacionamiento,
+                    monto_carga_electrica=desglose.carga_electrica,
+                    monto_boleto_perdido=desglose.boleto_perdido,
+                )
+            )
+
+            if self._auto_guardar:
+                self._guardar_sin_lock()
+            return boleto, desglose
+
+    def alta_o_renovar_pension(self, placa, titular, vehiculo, fecha_actual, meses=1):
+        """Da de alta una nueva pensión o renueva una existente."""
+        meses_num = int(meses)
+        if meses_num <= 0:
+            raise PensionError("Los meses de pensión deben ser mayores que cero.")
+
+        with self._lock:
+            placa_limpia = placa.strip().upper()
+            titular_limpio = titular.strip()
+            if not placa_limpia or not titular_limpio:
+                raise PensionError("Debe indicar la placa y el nombre del titular.")
+
+            monto_pension = self._tarifas.tarifa_pension_mensual * meses_num
+            dias = 30 * meses_num
+
+            if placa_limpia in self._pensiones:
+                pension = self._pensiones[placa_limpia]
+                base = fecha_actual if fecha_actual > pension.fecha_vencimiento else pension.fecha_vencimiento
+                pension.fecha_vencimiento = base + timedelta(days=dias)
+                pension.titular = titular_limpio
+            else:
+                cajon_libre = None
+                for nivel in self._niveles:
+                    for tipo_c in vehiculo.tipos_cajon_compatibles():
+                        for cajon in nivel.cajones:
+                            if not cajon.ocupado and not cajon.reservado_pension and cajon.tipo == tipo_c:
+                                cajon_libre = cajon
+                                break
+                        if cajon_libre is not None:
+                            break
+                    if cajon_libre is not None:
+                        break
+
+                if cajon_libre is None:
+                    raise CapacidadAgotadaError("No hay cajones disponibles para asignar una pensión.")
+
+                cajon_libre.reservado_pension = True
+                pension = Pension(
+                    placa=placa_limpia,
+                    titular=titular_limpio,
+                    id_cajon=cajon_libre.id_cajon,
+                    fecha_vencimiento=fecha_actual + timedelta(days=dias),
+                )
+                self._pensiones[placa_limpia] = pension
+
+            self._historial.append(
+                RegistroMovimiento(
+                    fecha_hora=fecha_actual,
+                    tipo_operacion="PENSION",
+                    placa=placa_limpia,
+                    tipo_vehiculo=vehiculo.tipo_nombre,
+                    monto_pension=monto_pension,
+                )
+            )
+
+            if self._auto_guardar:
+                self._guardar_sin_lock()
+            return pension
+
+    def consultar_pension(self, placa):
+        """Busca y devuelve la pensión registrada para una placa."""
+        with self._lock:
+            placa_limpia = placa.strip().upper()
+            if placa_limpia not in self._pensiones:
+                raise PensionError(f"No existe una pensión registrada para la placa {placa_limpia}.")
+            return self._pensiones[placa_limpia]
+
+    def obtener_ocupacion(self):
+        """Devuelve la ocupación por nivel y por tipo de cajón."""
+        with self._lock:
+            resumen = []
+            for nivel in self._niveles:
+                por_tipo = {}
+                for tipo in TipoCajon:
+                    cajones_tipo = [c for c in nivel.cajones if c.tipo == tipo]
+                    ocupados = sum(1 for c in cajones_tipo if c.ocupado)
+                    reservados = sum(1 for c in cajones_tipo if c.reservado_pension and not c.ocupado)
+                    por_tipo[tipo.value] = {
+                        "total": len(cajones_tipo),
+                        "ocupados": ocupados,
+                        "reservados_libres": reservados,
+                        "disponibles": len(cajones_tipo) - ocupados - reservados,
+                    }
+                resumen.append({"nivel": nivel.numero, "tipos": por_tipo})
+            return resumen
+
+    def generar_corte_caja(self, fecha_dia, ruta_salida):
+        """Genera y guarda el archivo de corte de caja para una fecha dada."""
+        with self._lock:
+            dia = fecha_dia.date()
+            movimientos = [m for m in self._historial if m.fecha_hora.date() == dia]
+
+            entradas = sum(1 for m in movimientos if m.tipo_operacion == "ENTRADA")
+            salidas = sum(1 for m in movimientos if m.tipo_operacion == "SALIDA")
+
+            por_vehiculo = {"moto": 0.0, "auto": 0.0, "camioneta": 0.0}
+            por_concepto = {
+                "Estacionamiento": 0.0,
+                "Carga eléctrica": 0.0,
+                "Boleto perdido": 0.0,
+                "Pensiones": 0.0,
+            }
+
+            for m in movimientos:
+                if m.tipo_vehiculo in por_vehiculo:
+                    por_vehiculo[m.tipo_vehiculo] += m.total
+                por_concepto["Estacionamiento"] += m.monto_estacionamiento
+                por_concepto["Carga eléctrica"] += m.monto_carga_electrica
+                por_concepto["Boleto perdido"] += m.monto_boleto_perdido
+                por_concepto["Pensiones"] += m.monto_pension
+
+            total = sum(por_concepto.values())
+
+            lineas = [
+                "==========================================",
+                f"CORTE DE CAJA - {dia.isoformat()}",
+                "==========================================",
+                f"Entradas: {entradas}",
+                f"Salidas:  {salidas}",
+                "",
+                "Ingresos por concepto:",
+            ]
+            for concepto, monto in por_concepto.items():
+                lineas.append(f"  - {concepto}: ${monto:.2f}")
+
+            lineas.append("")
+            lineas.append("Ingresos por tipo de vehículo:")
+            for tipo_v, monto in por_vehiculo.items():
+                lineas.append(f"  - {tipo_v}: ${monto:.2f}")
+
+            lineas.append("------------------------------------------")
+            lineas.append(f"Total del día: ${total:.2f}")
+
+            texto = "\n".join(lineas)
+            destino = Path(ruta_salida)
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            with open(destino, "w", encoding="utf-8") as archivo:
+                archivo.write(texto)
+            return texto
+
+    def obtener_conteos_actuales(self):
+        """Devuelve conteos de vehículos dentro y cajones ocupados."""
+        with self._lock:
+            ocupados = sum(1 for c in self._cajones_por_id.values() if c.ocupado)
+            placas = [c.placa_actual for c in self._cajones_por_id.values() if c.placa_actual is not None]
+            return {
+                "vehiculos_dentro": len(self._boletos_activos),
+                "cajones_ocupados": ocupados,
+                "placas_unicas": len(set(placas)),
+                "capacidad_total": len(self._cajones_por_id),
+            }
+
+
+            
