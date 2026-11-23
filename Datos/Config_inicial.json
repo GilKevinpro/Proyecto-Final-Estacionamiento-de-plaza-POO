@@ -1,0 +1,46 @@
+{
+  "tarifas": {
+    "minutos_gratis": 15,
+    "bloque_minutos": 15,
+    "tarifa_moto": 5.0,
+    "tarifa_auto": 8.0,
+    "tarifa_camioneta": 10.0,
+    "tarifa_kwh": 4.0,
+    "compra_minima_descuento": 500.0,
+    "minutos_gratis_compra": 120,
+    "tarifa_boleto_perdido": 250.0,
+    "tarifa_pension_mensual": 1200.0
+  },
+  "niveles": [
+    {
+      "nivel": 1,
+      "cajones": {
+        "moto": 5,
+        "compacto": 8,
+        "estandar": 8,
+        "discapacidad": 3,
+        "electrico": 3
+      }
+    },
+    {
+      "nivel": 2,
+      "cajones": {
+        "moto": 5,
+        "compacto": 10,
+        "estandar": 10,
+        "discapacidad": 2,
+        "electrico": 2
+      }
+    },
+    {
+      "nivel": 3,
+      "cajones": {
+        "moto": 5,
+        "compacto": 12,
+        "estandar": 12,
+        "discapacidad": 2,
+        "electrico": 2
+      }
+    }
+  ]
+}
