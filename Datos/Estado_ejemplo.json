@@ -1,0 +1,65 @@
+{
+  "consecutivo_folio": 3,
+  "boletos_activos": [
+    {
+      "folio": "FOL-000001",
+      "placa": "ABC-123",
+      "tipo_vehiculo": "auto",
+      "id_cajon": "N1-COM-01",
+      "nivel": 1,
+      "tipo_cajon": "compacto",
+      "hora_entrada": "2026-11-19T10:00:00",
+      "es_pensionado": false,
+      "tiene_tarjeton": false,
+      "es_electrico": false
+    },
+    {
+      "folio": "FOL-000002",
+      "placa": "ELE-999",
+      "tipo_vehiculo": "auto",
+      "id_cajon": "N1-ELE-01",
+      "nivel": 1,
+      "tipo_cajon": "electrico",
+      "hora_entrada": "2026-11-19T10:30:00",
+      "es_pensionado": false,
+      "tiene_tarjeton": false,
+      "es_electrico": true
+    }
+  ],
+  "pensiones": [
+    {
+      "placa": "PEN-001",
+      "titular": "Carlos Mendoza",
+      "id_cajon": "N1-EST-01",
+      "fecha_vencimiento": "2026-12-15T23:59:00"
+    },
+    {
+      "placa": "PEN-002",
+      "titular": "Laura Gómez",
+      "id_cajon": "N1-EST-02",
+      "fecha_vencimiento": "2026-10-01T23:59:00"
+    }
+  ],
+  "historial": [
+    {
+      "fecha_hora": "2026-11-19T10:00:00",
+      "tipo_operacion": "ENTRADA",
+      "placa": "ABC-123",
+      "tipo_vehiculo": "auto",
+      "monto_estacionamiento": 0.0,
+      "monto_carga_electrica": 0.0,
+      "monto_boleto_perdido": 0.0,
+      "monto_pension": 0.0
+    },
+    {
+      "fecha_hora": "2026-11-19T10:30:00",
+      "tipo_operacion": "ENTRADA",
+      "placa": "ELE-999",
+      "tipo_vehiculo": "auto",
+      "monto_estacionamiento": 0.0,
+      "monto_carga_electrica": 0.0,
+      "monto_boleto_perdido": 0.0,
+      "monto_pension": 0.0
+    }
+  ]
+}
